@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "homework-repo-tool"
+version = "0.1.0"
+description = "A CLI tool to submit homework files as separate GitHub repositories."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Khang Nguyen" }
+]
+dependencies = []
+
+[project.scripts]
+hw = "homework_repo_tool.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
