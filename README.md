@@ -57,8 +57,22 @@ Show history:
 hw history
 ```
 
+Check whether your machine is ready:
+
+```bash
+hw doctor
+```
+
 By default, repositories are public. To create private repositories:
 
 ```bash
 hw submit-session 5 it205 --visibility private
+```
+
+Submitted repositories are tagged automatically with topics like:
+
+```text
+homework
+it205
+ss05
 ```
