@@ -362,6 +362,67 @@ def ask_yes_no(question):
     return answer in {"y", "yes"}
 
 
+def print_session_items(items):
+    print("Found files:")
+    print()
+
+    for index, item in enumerate(items, start=1):
+        print(f"{index}. {item['file'].name} -> {item['repo_name']}")
+
+    print()
+
+
+def parse_number_selection(selection, max_number):
+    numbers = []
+
+    for part in selection.split(","):
+        part = part.strip()
+
+        if not part:
+            continue
+
+        if not part.isdigit():
+            raise ValueError(f"Invalid number: {part}")
+
+        number = int(part)
+
+        if number < 1 or number > max_number:
+            raise ValueError(f"Number out of range: {number}")
+
+        if number not in numbers:
+            numbers.append(number)
+
+    if not numbers:
+        raise ValueError("No files selected")
+
+    return numbers
+
+
+def choose_session_items(items):
+    print_session_items(items)
+
+    if ask_yes_no("Submit all files?"):
+        return items
+
+    selection = input("Enter file numbers to submit, separated by comma: ").strip()
+
+    try:
+        numbers = parse_number_selection(selection, len(items))
+    except ValueError as error:
+        print(f"Invalid selection: {error}")
+        return []
+
+    selected = [items[number - 1] for number in numbers]
+
+    print()
+    print("Selected files:")
+    for item in selected:
+        print(f"- {item['file'].name} -> {item['repo_name']}")
+    print()
+
+    return selected
+
+
 def session_preview(session, course, visibility):
     items = build_session_items(session, course)
 
@@ -436,6 +497,12 @@ def submit_session(session, course, visibility):
 
     if not items:
         print("No homework files found in the current folder.")
+        return
+
+    items = choose_session_items(items)
+
+    if not items:
+        print("No files submitted.")
         return
 
     submitted = []
