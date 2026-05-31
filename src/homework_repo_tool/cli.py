@@ -8,6 +8,14 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+
+console = Console()
+
 
 IGNORED_BATCH_FOLDERS = {
     ".git",
@@ -29,7 +37,7 @@ class SubmissionSkipped(Exception):
 
 
 def run(command, cwd=None):
-    print(f"> {' '.join(command)}")
+    console.print(f"[dim]> {' '.join(command)}[/dim]")
     subprocess.run(command, check=True, cwd=cwd)
 
 
@@ -74,7 +82,7 @@ def create_repo_topics(session, course):
 
 def preview(exercise, session, course):
     repo_name = create_repo_name(exercise, session, course)
-    print(repo_name)
+    console.print(Panel(repo_name, title="Repository name", border_style="cyan"))
 
 
 def create_readme(exercise, session, course, repo_name, folder=None):
@@ -102,7 +110,7 @@ Open `index.html` in your browser.
 """
 
     readme_path.write_text(content, encoding="utf-8")
-    print("Created README.md")
+    console.print("[green]Created README.md[/green]")
 
 
 def get_history_file():
@@ -135,31 +143,43 @@ def save_history(exercise, session, course, repo_name, repo_url):
         encoding="utf-8",
     )
 
-    print("Saved to history")
+    console.print("[green]Saved to history[/green]")
 
 
 def show_history():
     history_file = get_history_file()
 
     if not history_file.exists():
-        print("No submission history yet.")
+        console.print("[yellow]No submission history yet.[/yellow]")
         return
 
     history = json.loads(history_file.read_text(encoding="utf-8"))
 
     if not history:
-        print("No submission history yet.")
+        console.print("[yellow]No submission history yet.[/yellow]")
         return
 
-    print("Submitted repositories:")
-    print()
+    table = Table(title="Submitted repositories")
+    table.add_column("No", justify="right")
+    table.add_column("Exercise")
+    table.add_column("Session")
+    table.add_column("Course")
+    table.add_column("Repository")
+    table.add_column("Link")
+    table.add_column("Time")
 
     for index, item in enumerate(history, start=1):
-        print(f"{index}. {item['exercise']} - {item['session']} - {item['course']}")
-        print(f"   Repo: {item['repo_name']}")
-        print(f"   Link: {item['repo_url']}")
-        print(f"   Time: {item['submitted_at']}")
-        print()
+        table.add_row(
+            str(index),
+            item["exercise"],
+            item["session"],
+            item["course"],
+            item["repo_name"],
+            item["repo_url"],
+            item["submitted_at"],
+        )
+
+    console.print(table)
 
 
 def ensure_gitignore(folder):
@@ -215,9 +235,9 @@ def add_repo_topics(username, repo_name, session, course):
     result = subprocess.run(command, check=False)
 
     if result.returncode == 0:
-        print(f"Added topics: {', '.join(topics)}")
+        console.print(f"[green]Added topics:[/green] {', '.join(topics)}")
     else:
-        print("Could not add repository topics. Continuing...")
+        console.print("[yellow]Could not add repository topics. Continuing...[/yellow]")
 
 
 def push_to_github(folder, repo_name, visibility, session, course):
@@ -228,7 +248,7 @@ def push_to_github(folder, repo_name, visibility, session, course):
     if github_repo_exists(username, repo_name):
         if not ask_yes_no(f"Repository {repo_name} already exists. Overwrite it?"):
             raise SubmissionSkipped(f"Skipped existing repository: {repo_name}")
-        print("Repository already exists. Pushing latest files to it...")
+        console.print("[yellow]Repository already exists. Pushing latest files to it...[/yellow]")
     else:
         visibility_flag = "--public" if visibility == "public" else "--private"
         run(["gh", "repo", "create", repo_name, visibility_flag], cwd=folder)
@@ -252,8 +272,8 @@ def submit_folder(
 ):
     folder = folder.resolve()
     repo_name = repo_name or create_repo_name(exercise, session, course)
-    print(f"Repo name: {repo_name}")
-    print(f"Folder: {folder}")
+    console.print(f"[bold]Repo name:[/bold] {repo_name}")
+    console.print(f"[bold]Folder:[/bold] {folder}")
 
     if include_support_files:
         create_readme(exercise, session, course, repo_name, folder)
@@ -269,15 +289,14 @@ def submit_folder(
     if has_staged_changes(folder):
         run(["git", "commit", "-m", f"Submit {repo_name}"], cwd=folder)
     else:
-        print("No new changes to commit. Continuing...")
+        console.print("[yellow]No new changes to commit. Continuing...[/yellow]")
 
     repo_url = push_to_github(folder, repo_name, visibility, session, course)
 
     save_history(exercise, session, course, repo_name, repo_url)
 
-    print()
-    print("Done. Submit this link:")
-    print(repo_url)
+    console.print()
+    console.print(Panel(repo_url, title="Done. Submit this link", border_style="green"))
 
     return {
         "exercise": f"EX{int(exercise):02d}",
@@ -306,11 +325,11 @@ def submit_single_file(source_file, exercise, session, course, visibility, repo_
     source_file = Path(source_file)
 
     if not source_file.exists():
-        print(f"File not found: {source_file}")
+        console.print(f"[red]File not found:[/red] {source_file}")
         return None
 
     if not source_file.is_file():
-        print(f"Not a file: {source_file}")
+        console.print(f"[red]Not a file:[/red] {source_file}")
         return None
 
     repo_name = repo_name or create_repo_name(exercise, session, course)
@@ -401,13 +420,15 @@ def ask_yes_no(question):
 
 
 def print_session_items(items):
-    print("Found files:")
-    print()
+    table = Table(title=f"Found {len(items)} file(s)")
+    table.add_column("No", justify="right", style="cyan")
+    table.add_column("File", style="bold")
+    table.add_column("Repository", style="green")
 
     for index, item in enumerate(items, start=1):
-        print(f"{index}. {item['file'].name} -> {item['repo_name']}")
+        table.add_row(str(index), item["file"].name, item["repo_name"])
 
-    print()
+    console.print(table)
 
 
 def parse_number_selection(selection, max_number):
@@ -447,16 +468,16 @@ def choose_session_items(items):
     try:
         numbers = parse_number_selection(selection, len(items))
     except ValueError as error:
-        print(f"Invalid selection: {error}")
+        console.print(f"[red]Invalid selection:[/red] {error}")
         return []
 
     selected = [items[number - 1] for number in numbers]
 
-    print()
-    print("Selected files:")
+    console.print()
+    console.print("[bold]Selected files:[/bold]")
     for item in selected:
-        print(f"- {item['file'].name} -> {item['repo_name']}")
-    print()
+        console.print(f"- {item['file'].name} [dim]->[/dim] [green]{item['repo_name']}[/green]")
+    console.print()
 
     return selected
 
@@ -465,47 +486,43 @@ def session_preview(session, course, visibility):
     items = build_session_items(session, course)
 
     if not items:
-        print("No homework files found in the current folder.")
+        console.print("[yellow]No homework files found in the current folder.[/yellow]")
         return
 
-    print("Repositories will be submitted:")
-    print()
-
-    for item in items:
-        print(f"{item['file'].name} -> {item['repo_name']}")
-
-    print()
+    print_session_items(items)
 
     if ask_yes_no("Do you want to push now?"):
-        print()
+        console.print()
         submit_session(session, course, visibility)
     else:
-        print("Skipped. You can push later with:")
-        print(f"hw submit-session {int(session)} {course.upper()}")
+        console.print("[yellow]Skipped.[/yellow] You can push later with:")
+        console.print(f"[bold]hw submit-session {int(session)} {course.upper()}[/bold]")
 
 
 def print_submission_summary(submitted, failed):
     if submitted:
-        print("Done. Submitted repositories:")
-        print()
+        table = Table(title="Done. Submitted repositories")
+        table.add_column("No", justify="right", style="cyan")
+        table.add_column("File", style="bold")
+        table.add_column("Repository", style="green")
+        table.add_column("Link", style="blue")
 
         for index, item in enumerate(submitted, start=1):
-            print(f"{index}. {item['file']}")
-            print(f"   Repo: {item['repo_name']}")
-            print(f"   Link: {item['repo_url']}")
-            print()
+            table.add_row(str(index), item["file"], item["repo_name"], item["repo_url"])
 
-        print("Copy these links:")
-        print()
+        console.print(table)
+
+        console.print("[bold]Copy these links:[/bold]")
+        console.print()
 
         for item in submitted:
-            print(item["repo_url"])
+            console.print(item["repo_url"])
 
     if failed:
-        print()
-        print("Failed files:")
+        console.print()
+        console.print("[red]Failed files:[/red]")
         for item in failed:
-            print(f"- {item['file']}: {item['reason']}")
+            console.print(f"- {item['file']}: {item['reason']}")
 
 
 def write_submission_links(session, course, submitted):
@@ -526,21 +543,21 @@ def write_submission_links(session, course, submitted):
         )
 
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print()
-    print(f"Created {output_path.name}")
+    console.print()
+    console.print(f"[green]Created {output_path.name}[/green]")
 
 
 def submit_session(session, course, visibility):
     items = build_session_items(session, course)
 
     if not items:
-        print("No homework files found in the current folder.")
+        console.print("[yellow]No homework files found in the current folder.[/yellow]")
         return
 
     items = choose_session_items(items)
 
     if not items:
-        print("No files submitted.")
+        console.print("[yellow]No files submitted.[/yellow]")
         return
 
     submitted = []
@@ -551,9 +568,7 @@ def submit_session(session, course, visibility):
         exercise = item["exercise"]
         repo_name = item["repo_name"]
 
-        print("=" * 60)
-        print(f"Submitting {source_file.name}")
-        print("=" * 60)
+        console.rule(f"Submitting {source_file.name}")
 
         try:
             result = submit_single_file(
@@ -570,12 +585,12 @@ def submit_session(session, course, visibility):
                 failed.append({"file": source_file.name, "reason": "Submit skipped"})
         except SubmissionSkipped as error:
             failed.append({"file": source_file.name, "reason": str(error)})
-            print(error)
+            console.print(f"[yellow]{error}[/yellow]")
         except subprocess.CalledProcessError as error:
             failed.append({"file": source_file.name, "reason": str(error)})
-            print(f"Failed to submit {source_file.name}. Continuing...")
+            console.print(f"[red]Failed to submit {source_file.name}. Continuing...[/red]")
 
-        print()
+        console.print()
 
     if submitted:
         write_submission_links(session, course, submitted)
@@ -600,57 +615,60 @@ def batch_preview(exercise, session, course):
     folders = find_homework_folders(Path.cwd())
 
     if not folders:
-        print("No homework folders found.")
+        console.print("[yellow]No homework folders found.[/yellow]")
         return
 
-    print("Repositories will be created:")
-    print()
+    table = Table(title="Repositories will be created")
+    table.add_column("Folder", style="bold")
+    table.add_column("Repository", style="green")
 
     for folder in folders:
         repo_name = create_batch_repo_name(exercise, session, course, folder.name)
-        print(f"- {folder.name} -> {repo_name}")
+        table.add_row(folder.name, repo_name)
+
+    console.print(table)
 
 
 def batch_submit(exercise, session, course, visibility):
     folders = find_homework_folders(Path.cwd())
 
     if not folders:
-        print("No homework folders found.")
+        console.print("[yellow]No homework folders found.[/yellow]")
         return
 
-    print(f"Found {len(folders)} homework folder(s).")
-    print()
+    console.print(f"[bold]Found {len(folders)} homework folder(s).[/bold]")
+    console.print()
 
     submitted = []
     failed = []
 
     for folder in folders:
         repo_name = create_batch_repo_name(exercise, session, course, folder.name)
-        print("=" * 60)
-        print(f"Submitting {folder.name}")
-        print("=" * 60)
+        console.rule(f"Submitting {folder.name}")
 
         try:
             submit_folder(folder, exercise, session, course, visibility, repo_name)
             submitted.append(repo_name)
         except SubmissionSkipped as error:
             failed.append((repo_name, error))
-            print(error)
+            console.print(f"[yellow]{error}[/yellow]")
         except subprocess.CalledProcessError as error:
             failed.append((repo_name, error))
-            print(f"Failed to submit {repo_name}. Continuing...")
+            console.print(f"[red]Failed to submit {repo_name}. Continuing...[/red]")
 
-        print()
+        console.print()
 
-    print("Batch submit finished.")
-    print(f"Submitted: {len(submitted)}")
-    print(f"Failed: {len(failed)}")
+    console.print(Panel(
+        f"Submitted: {len(submitted)}\nFailed: {len(failed)}",
+        title="Batch submit finished",
+        border_style="green" if not failed else "yellow",
+    ))
 
     if failed:
-        print()
-        print("Failed repositories:")
+        console.print()
+        console.print("[red]Failed repositories:[/red]")
         for repo_name, _ in failed:
-            print(f"- {repo_name}")
+            console.print(f"- {repo_name}")
 
 
 def get_command_output(command):
@@ -670,26 +688,29 @@ def get_command_output(command):
 
 
 def print_check(label, ok, detail=None):
-    status = "OK" if ok else "MISSING"
-    print(f"{label}: {status}")
-
-    if detail:
-        print(f"  {detail}")
+    status = "[green]OK[/green]" if ok else "[red]MISSING[/red]"
+    detail_text = detail or ""
+    return label, status, detail_text
 
 
 def doctor():
-    print("Homework Repo Tool doctor")
-    print()
+    console.print(Panel("Homework Repo Tool doctor", border_style="cyan"))
+    table = Table()
+    table.add_column("Check", style="bold")
+    table.add_column("Status")
+    table.add_column("Detail")
 
-    print_check("Python", True, sys.version.split()[0])
+    table.add_row(*print_check("Python", True, sys.version.split()[0]))
 
     git_path = shutil.which("git")
     git_version = get_command_output(["git", "--version"]) if git_path else None
-    print_check("Git", bool(git_path), git_version or "Install Git first.")
+    table.add_row(*print_check("Git", bool(git_path), git_version or "Install Git first."))
 
     gh_path = shutil.which("gh")
     gh_version = get_command_output(["gh", "--version"]) if gh_path else None
-    print_check("GitHub CLI", bool(gh_path), gh_version or "Install GitHub CLI first.")
+    table.add_row(
+        *print_check("GitHub CLI", bool(gh_path), gh_version or "Install GitHub CLI first.")
+    )
 
     if gh_path:
         auth_result = subprocess.run(
@@ -698,22 +719,24 @@ def doctor():
             stderr=subprocess.DEVNULL,
             check=False,
         )
-        print_check(
-            "GitHub login",
-            auth_result.returncode == 0,
-            "Run: gh auth login" if auth_result.returncode != 0 else None,
+        table.add_row(
+            *print_check(
+                "GitHub login",
+                auth_result.returncode == 0,
+                "Run: gh auth login" if auth_result.returncode != 0 else None,
+            )
         )
     else:
-        print_check("GitHub login", False, "Install GitHub CLI first.")
+        table.add_row(*print_check("GitHub login", False, "Install GitHub CLI first."))
 
     pipx_path = shutil.which("pipx")
     pipx_version = get_command_output(["pipx", "--version"]) if pipx_path else None
-    print_check("pipx", bool(pipx_path), pipx_version or "Install pipx first.")
+    table.add_row(*print_check("pipx", bool(pipx_path), pipx_version or "Install pipx first."))
+    console.print(table)
 
 
 def guide():
-    print(
-        """
+    guide_text = """
 Huong dan nhanh Homework Repo Tool
 
 1. Kiem tra may da san sang chua:
@@ -751,8 +774,8 @@ Ghi chu:
 - Ten repo lay theo ten file, vi du bai1.py -> bai1-ss05-IT205.
 - Tool tu gan topic: homework, it205, ss05.
 - Neu repo da ton tai, tool se hoi truoc khi push de.
-""".strip()
-    )
+    """.strip()
+    console.print(Panel(guide_text, title="Huong dan", border_style="cyan"))
 
 
 def main():

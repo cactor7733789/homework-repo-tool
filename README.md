@@ -3,6 +3,7 @@
 Homework Repo Tool is a Python CLI for submitting homework files to GitHub.
 
 It can scan a session folder, preview the repositories that will be created, and submit each Python exercise file as a separate GitHub repository.
+The terminal output uses tables and panels for easier reading.
 
 ## Requirements
 

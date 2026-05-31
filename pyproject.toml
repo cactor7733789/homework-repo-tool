@@ -11,7 +11,9 @@ requires-python = ">=3.9"
 authors = [
     { name = "Khang Nguyen" }
 ]
-dependencies = []
+dependencies = [
+    "rich>=13.7.0",
+]
 
 [project.scripts]
 hw = "homework_repo_tool.cli:main"
