@@ -8,10 +8,65 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+except ImportError:
+    def _strip_markup(value):
+        return re.sub(r"\[/?[^\]]+\]", "", str(value))
+
+
+    class Console:
+        def print(self, *values, **kwargs):
+            if not values:
+                print()
+                return
+
+            print(*(_strip_markup(value) for value in values))
+
+        def rule(self, title):
+            print()
+            print(f"--- {title} ---")
+
+
+    class Panel:
+        def __init__(self, renderable, title=None, border_style=None):
+            self.renderable = renderable
+            self.title = title
+
+        def __str__(self):
+            if self.title:
+                return f"{self.title}\n{self.renderable}"
+            return str(self.renderable)
+
+
+    class Table:
+        def __init__(self, title=None):
+            self.title = title
+            self.columns = []
+            self.rows = []
+
+        def add_column(self, header, **kwargs):
+            self.columns.append(header)
+
+        def add_row(self, *values):
+            self.rows.append([str(value) for value in values])
+
+        def __str__(self):
+            lines = []
+
+            if self.title:
+                lines.append(self.title)
+
+            if self.columns:
+                lines.append(" | ".join(self.columns))
+                lines.append(" | ".join("-" * len(column) for column in self.columns))
+
+            for row in self.rows:
+                lines.append(" | ".join(row))
+
+            return "\n".join(lines)
 
 
 console = Console()
