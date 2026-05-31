@@ -17,6 +17,11 @@ IGNORED_BATCH_FOLDERS = {
     "node_modules",
 }
 
+IGNORED_SESSION_FILES = {
+    ".gitignore",
+    "README.md",
+}
+
 
 def run(command, cwd=None):
     print(f"> {' '.join(command)}")
@@ -50,6 +55,12 @@ def slugify(value):
 
 def create_batch_repo_name(exercise, session, course, folder_name):
     return f"{create_repo_name(exercise, session, course)}-{slugify(folder_name)}"
+
+
+def create_session_repo_name(file_path, session, course):
+    file_name = Path(file_path).stem
+    ss = format_number("ss", session)
+    return f"{slugify(file_name)}-{ss}-{course.upper()}"
 
 
 def preview(exercise, session, course):
@@ -261,7 +272,7 @@ def copy_file_to_temp_folder(source_file, repo_name):
     return temp_path, repo_folder
 
 
-def submit_single_file(source_file, exercise, session, course, visibility):
+def submit_single_file(source_file, exercise, session, course, visibility, repo_name=None):
     source_file = Path(source_file)
 
     if not source_file.exists():
@@ -272,7 +283,7 @@ def submit_single_file(source_file, exercise, session, course, visibility):
         print(f"Not a file: {source_file}")
         return None
 
-    repo_name = create_repo_name(exercise, session, course)
+    repo_name = repo_name or create_repo_name(exercise, session, course)
 
     temp_path, folder = copy_file_to_temp_folder(source_file, repo_name)
 
@@ -307,8 +318,21 @@ def get_exercise_from_file_name(path):
 
 
 def find_session_files(folder):
+    files = []
+
+    for path in folder.iterdir():
+        if not path.is_file():
+            continue
+        if path.name.startswith("."):
+            continue
+        if path.name in IGNORED_SESSION_FILES:
+            continue
+        if path.name.startswith("submission-links-") and path.suffix == ".md":
+            continue
+        files.append(path)
+
     return sorted(
-        [path for path in folder.glob("*.py") if path.is_file()],
+        files,
         key=lambda path: (get_exercise_from_file_name(path) or 999999, path.name.lower()),
     )
 
@@ -323,7 +347,7 @@ def build_session_items(session, course):
             {
                 "file": source_file,
                 "exercise": exercise,
-                "repo_name": create_repo_name(exercise, session, course),
+                "repo_name": create_session_repo_name(source_file, session, course),
             }
         )
 
@@ -339,7 +363,7 @@ def session_preview(session, course, visibility):
     items = build_session_items(session, course)
 
     if not items:
-        print("No .py files found in the current folder.")
+        print("No homework files found in the current folder.")
         return
 
     print("Repositories will be submitted:")
@@ -408,7 +432,7 @@ def submit_session(session, course, visibility):
     items = build_session_items(session, course)
 
     if not items:
-        print("No .py files found in the current folder.")
+        print("No homework files found in the current folder.")
         return
 
     submitted = []
@@ -417,13 +441,21 @@ def submit_session(session, course, visibility):
     for item in items:
         source_file = item["file"]
         exercise = item["exercise"]
+        repo_name = item["repo_name"]
 
         print("=" * 60)
         print(f"Submitting {source_file.name}")
         print("=" * 60)
 
         try:
-            result = submit_single_file(source_file, exercise, session, course, visibility)
+            result = submit_single_file(
+                source_file,
+                exercise,
+                session,
+                course,
+                visibility,
+                repo_name,
+            )
             if result:
                 submitted.append(result)
             else:
