@@ -304,8 +304,11 @@ def submit_single_file(source_file, exercise, session, course, visibility, repo_
     return result
 
 
-def submit_file(file_path, exercise, session, course, visibility):
-    submit_single_file(Path.cwd() / file_path, exercise, session, course, visibility)
+def submit_file(file_path, session, course, visibility):
+    source_file = Path.cwd() / file_path
+    exercise = get_exercise_from_file_name(source_file) or 1
+    repo_name = create_session_repo_name(source_file, session, course)
+    submit_single_file(source_file, exercise, session, course, visibility, repo_name)
 
 
 def get_exercise_from_file_name(path):
@@ -561,7 +564,6 @@ def main():
 
     submit_file_parser = subparsers.add_parser("submit-file")
     submit_file_parser.add_argument("file")
-    submit_file_parser.add_argument("exercise")
     submit_file_parser.add_argument("session")
     submit_file_parser.add_argument("course")
     submit_file_parser.add_argument(
@@ -612,7 +614,7 @@ def main():
     elif args.command == "submit":
         submit(args.exercise, args.session, args.course, args.visibility)
     elif args.command == "submit-file":
-        submit_file(args.file, args.exercise, args.session, args.course, args.visibility)
+        submit_file(args.file, args.session, args.course, args.visibility)
     elif args.command == "submit-session":
         submit_session(args.session, args.course, args.visibility)
     elif args.command == "session-preview":

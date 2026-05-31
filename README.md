@@ -48,7 +48,7 @@ hw submit-session 5 it205
 Submit one file:
 
 ```bash
-hw submit-file bai1.py 1 5 it205
+hw submit-file bai1.py 5 it205
 ```
 
 Show history:
