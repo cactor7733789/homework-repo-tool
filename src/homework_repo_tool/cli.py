@@ -147,22 +147,28 @@ def create_readme(exercise, session, course, repo_name, folder=None):
     if readme_path.exists():
         return
 
-    content = f"""# {repo_name}
+    info_lines = []
+    if exercise is not None:
+        info_lines.append(f"- Exercise: EX{int(exercise):02d}")
+    if session is not None:
+        info_lines.append(f"- Session: SS{int(session):02d}")
+    if course:
+        info_lines.append(f"- Course: {course.upper()}")
 
-## Information
+    if info_lines:
+        info_section = "## Information\n\n" + "\n".join(info_lines) + "\n\n"
+    else:
+        info_section = ""
 
-- Exercise: EX{int(exercise):02d}
-- Session: SS{int(session):02d}
-- Course: {course.upper()}
-
-## Description
-
-Homework submission for {course.upper()}.
-
-## How to run
-
-Open `index.html` in your browser.
-"""
+    course_label = course.upper() if course else "this course"
+    content = (
+        f"# {repo_name}\n\n"
+        f"{info_section}"
+        "## Description\n\n"
+        f"Homework submission for {course_label}.\n\n"
+        "## How to run\n\n"
+        "Open `index.html` in your browser.\n"
+    )
 
     readme_path.write_text(content, encoding="utf-8")
     console.print("[green]Created README.md[/green]")
@@ -182,10 +188,14 @@ def save_history(exercise, session, course, repo_name, repo_url):
     else:
         history = []
 
+    exercise_label = f"EX{int(exercise):02d}" if exercise is not None else "-"
+    session_label = f"SS{int(session):02d}" if session is not None else "-"
+    course_label = course.upper() if course else "-"
+
     item = {
-        "exercise": f"EX{int(exercise):02d}",
-        "session": f"SS{int(session):02d}",
-        "course": course.upper(),
+        "exercise": exercise_label,
+        "session": session_label,
+        "course": course_label,
         "repo_name": repo_name,
         "repo_url": repo_url,
         "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -281,6 +291,9 @@ def set_git_remote(folder, repo_url):
 
 
 def add_repo_topics(username, repo_name, session, course):
+    if session is None or not course:
+        return
+
     topics = create_repo_topics(session, course)
     command = ["gh", "repo", "edit", f"{username}/{repo_name}"]
 
@@ -354,7 +367,7 @@ def submit_folder(
     console.print(Panel(repo_url, title="Done. Submit this link", border_style="green"))
 
     return {
-        "exercise": f"EX{int(exercise):02d}",
+        "exercise": f"EX{int(exercise):02d}" if exercise is not None else "-",
         "file": None,
         "repo_name": repo_name,
         "repo_url": repo_url,
@@ -366,6 +379,61 @@ def submit(exercise, session, course, visibility):
         submit_folder(Path.cwd(), exercise, session, course, visibility)
     except SubmissionSkipped as error:
         print(error)
+
+def up(repo_name, visibility):
+    repo_name = str(repo_name).strip()
+
+    if not repo_name:
+        console.print("[red]Repository name is required.[/red]")
+        return
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", repo_name):
+        console.print(
+            "[yellow]Warning:[/yellow] Repo name may be invalid on GitHub. "
+            "Use only letters, numbers, dot (.), underscore (_), hyphen (-)."
+        )
+
+    source_files = find_session_files(Path.cwd())
+    if not source_files:
+        console.print("[yellow]No homework files found in the current folder.[/yellow]")
+        return
+
+    table = Table(title=f"Found {len(source_files)} file(s)")
+    table.add_column("No", justify="right", style="cyan")
+    table.add_column("File", style="bold")
+    table.add_column("Repository", style="green")
+
+    for index, source_file in enumerate(source_files, start=1):
+        table.add_row(str(index), source_file.name, repo_name)
+
+    console.print(table)
+
+    if not ask_yes_no("Do you want to push now?"):
+        console.print("[yellow]Skipped.[/yellow] You can push later with:")
+        console.print(f"[bold]hw up {repo_name}[/bold]")
+        return
+
+    temp_path = Path(tempfile.mkdtemp())
+    folder = temp_path / repo_name
+    folder.mkdir()
+
+    try:
+        for source_file in source_files:
+            shutil.copy2(source_file, folder / source_file.name)
+
+        submit_folder(
+            folder,
+            exercise=None,
+            session=None,
+            course=None,
+            visibility=visibility,
+            repo_name=repo_name,
+            include_support_files=False,
+        )
+    except SubmissionSkipped as error:
+        print(error)
+    finally:
+        shutil.rmtree(temp_path, ignore_errors=True)
 
 
 def copy_file_to_temp_folder(source_file, repo_name):
@@ -824,9 +892,13 @@ Huong dan nhanh Homework Repo Tool
 8. Tao repo private:
    hw submit-session 5 it205 --visibility private
 
+9. Nop nguyen folder hien tai voi ten repo tuy chon:
+   hw up ten-repo-theo-thay
+
 Ghi chu:
 - Mac dinh repo la public.
 - Ten repo lay theo ten file, vi du bai1.py -> bai1-ss05-IT205.
+- Lenh hw up chi upload cac file trong folder (khong tao README.md / .gitignore).
 - Tool tu gan topic: homework, it205, ss05.
 - Neu repo da ton tai, tool se hoi truoc khi push de.
     """.strip()
@@ -919,6 +991,20 @@ def main():
         default="public",
     )
 
+    up_parser = subparsers.add_parser(
+        "up",
+        help="Nop folder hien tai len GitHub voi ten repo tuy chon",
+    )
+    up_parser.add_argument(
+        "repo_name",
+        help="Ten repo dung y chang ten ban nhap (khong tu dong doi).",
+    )
+    up_parser.add_argument(
+        "--visibility",
+        choices=["public", "private"],
+        default="public",
+    )
+
     subparsers.add_parser("history", help="Xem lai cac link da nop")
     subparsers.add_parser("doctor", help="Kiem tra Git, GitHub CLI, login, pipx")
     subparsers.add_parser("guide", help="Huong dan su dung bang tieng Viet")
@@ -939,6 +1025,8 @@ def main():
         batch_preview(args.exercise, args.session, args.course)
     elif args.command == "batch-submit":
         batch_submit(args.exercise, args.session, args.course, args.visibility)
+    elif args.command == "up":
+        up(args.repo_name, args.visibility)
     elif args.command == "history":
         show_history()
     elif args.command == "doctor":

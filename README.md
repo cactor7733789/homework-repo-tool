@@ -52,6 +52,14 @@ Submit one file:
 hw submit-file bai1.py 5 it205
 ```
 
+Submit the current folder with a custom repository name:
+
+```bash
+hw up hackathon-team-01
+```
+
+`hw up` only uploads the files in the current folder (no auto-generated `README.md` or `.gitignore`).
+
 Show history:
 
 ```bash
