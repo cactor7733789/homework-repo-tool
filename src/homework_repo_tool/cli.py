@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -380,6 +381,17 @@ def submit(exercise, session, course, visibility):
     except SubmissionSkipped as error:
         print(error)
 
+
+def warn_if_repo_name_invalid(repo_name):
+    if re.fullmatch(r"[A-Za-z0-9._-]+", repo_name):
+        return
+
+    console.print(
+        "[yellow]Warning:[/yellow] Repo name may be invalid on GitHub. "
+        "Use only letters, numbers, dot (.), underscore (_), hyphen (-)."
+    )
+
+
 def up(repo_name, visibility):
     repo_name = str(repo_name).strip()
 
@@ -387,11 +399,7 @@ def up(repo_name, visibility):
         console.print("[red]Repository name is required.[/red]")
         return
 
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", repo_name):
-        console.print(
-            "[yellow]Warning:[/yellow] Repo name may be invalid on GitHub. "
-            "Use only letters, numbers, dot (.), underscore (_), hyphen (-)."
-        )
+    warn_if_repo_name_invalid(repo_name)
 
     source_files = find_session_files(Path.cwd())
     if not source_files:
@@ -434,6 +442,250 @@ def up(repo_name, visibility):
         print(error)
     finally:
         shutil.rmtree(temp_path, ignore_errors=True)
+
+
+def find_session_entries(folder):
+    entries = []
+
+    for path in folder.iterdir():
+        if path.name.startswith("."):
+            continue
+
+        if path.is_file():
+            if path.name in IGNORED_SESSION_FILES:
+                continue
+            if path.name.startswith("submission-links-") and path.suffix == ".md":
+                continue
+            entries.append(path)
+            continue
+
+        if path.is_dir():
+            if path.name in IGNORED_BATCH_FOLDERS:
+                continue
+            entries.append(path)
+
+    return sorted(
+        entries,
+        key=lambda path: (get_exercise_from_file_name(path) or 999999, path.name.lower()),
+    )
+
+
+def list_uploadable_files(folder):
+    folder = folder.resolve()
+    files = []
+
+    for root, dirs, filenames in os.walk(folder):
+        dirs[:] = [
+            name
+            for name in dirs
+            if not name.startswith(".") and name not in IGNORED_BATCH_FOLDERS
+        ]
+
+        root_path = Path(root)
+        for filename in filenames:
+            if filename.startswith("."):
+                continue
+            files.append(root_path / filename)
+
+    return sorted(files, key=lambda path: str(path.relative_to(folder)).lower())
+
+
+def copy_folder_to_temp_folder(source_folder, repo_name):
+    temp_path = Path(tempfile.mkdtemp())
+    repo_folder = temp_path / repo_name
+
+    def ignore(directory, names):
+        ignored = []
+        for name in names:
+            if name.startswith(".") or name in IGNORED_BATCH_FOLDERS:
+                ignored.append(name)
+        return set(ignored)
+
+    shutil.copytree(
+        source_folder,
+        repo_folder,
+        dirs_exist_ok=True,
+        ignore=ignore,
+    )
+    return temp_path, repo_folder
+
+
+def build_up_session_items(folder):
+    entries = find_session_entries(folder)
+    items = []
+
+    for entry in entries:
+        if entry.is_file():
+            repo_name = slugify(entry.stem)
+            items.append({"path": entry, "type": "file", "repo_name": repo_name})
+        elif entry.is_dir():
+            repo_name = slugify(entry.name)
+            items.append({"path": entry, "type": "folder", "repo_name": repo_name})
+
+    used_repo_names = set()
+    for item in items:
+        base_name = item["repo_name"]
+        repo_name = base_name
+        suffix = 2
+        while repo_name in used_repo_names:
+            repo_name = f"{base_name}-{suffix}"
+            suffix += 1
+        item["repo_name"] = repo_name
+        used_repo_names.add(repo_name)
+
+    return items
+
+
+def print_up_session_items(items):
+    file_count = sum(1 for item in items if item["type"] == "file")
+    folder_count = sum(1 for item in items if item["type"] == "folder")
+
+    table = Table(
+        title=f"Found {len(items)} item(s) ({file_count} file(s), {folder_count} folder(s))"
+    )
+    table.add_column("No", justify="right", style="cyan")
+    table.add_column("Type", style="magenta")
+    table.add_column("Item", style="bold")
+    table.add_column("Repository", style="green")
+
+    for index, item in enumerate(items, start=1):
+        entry = item["path"]
+        table.add_row(str(index), item["type"], entry.name, item["repo_name"])
+
+    console.print(table)
+
+
+def up_split_folder(folder_name, visibility):
+    folder_name = str(folder_name).strip()
+    if not folder_name:
+        console.print("[red]Folder name is required.[/red]")
+        return
+
+    source_folder = (Path.cwd() / folder_name).resolve()
+    if not source_folder.exists():
+        console.print(f"[red]Folder not found:[/red] {source_folder}")
+        return
+    if not source_folder.is_dir():
+        console.print(f"[red]Not a folder:[/red] {source_folder}")
+        return
+
+    items = build_up_session_items(source_folder)
+
+    if not items:
+        console.print("[yellow]No homework files/folders found in the selected folder.[/yellow]")
+        return
+
+    print_up_session_items(items)
+
+    if not ask_yes_no("Do you want to push now?"):
+        console.print("[yellow]Skipped.[/yellow] You can push later with:")
+        console.print(f"[bold]hw up-folder {folder_name}[/bold]")
+        return
+
+    submitted = []
+    failed = []
+
+    for item in items:
+        source_path = item["path"]
+        repo_name = item["repo_name"]
+
+        console.rule(f"Submitting {source_path.name}")
+
+        try:
+            if source_path.is_file():
+                temp_path, folder = copy_file_to_temp_folder(source_path, repo_name)
+            else:
+                temp_path, folder = copy_folder_to_temp_folder(source_path, repo_name)
+
+            try:
+                result = submit_folder(
+                    folder,
+                    exercise=None,
+                    session=None,
+                    course=None,
+                    visibility=visibility,
+                    repo_name=repo_name,
+                    include_support_files=False,
+                )
+                result["file"] = source_path.name
+                submitted.append(result)
+            finally:
+                shutil.rmtree(temp_path, ignore_errors=True)
+        except SubmissionSkipped as error:
+            failed.append({"file": source_path.name, "reason": str(error)})
+            console.print(f"[yellow]{error}[/yellow]")
+        except subprocess.CalledProcessError as error:
+            failed.append({"file": source_path.name, "reason": str(error)})
+            console.print(f"[red]Failed to submit {source_path.name}. Continuing...[/red]")
+
+        console.print()
+
+    print_submission_summary(submitted, failed)
+
+
+def up_single_repo_folder(folder_name, visibility):
+    folder_name = str(folder_name).strip()
+    if not folder_name:
+        console.print("[red]Folder name is required.[/red]")
+        return
+
+    source_folder = (Path.cwd() / folder_name).resolve()
+    if not source_folder.exists():
+        console.print(f"[red]Folder not found:[/red] {source_folder}")
+        return
+    if not source_folder.is_dir():
+        console.print(f"[red]Not a folder:[/red] {source_folder}")
+        return
+
+    repo_name = source_folder.name
+    warn_if_repo_name_invalid(repo_name)
+
+    source_files = list_uploadable_files(source_folder)
+    if not source_files:
+        console.print("[yellow]No homework files found in the selected folder.[/yellow]")
+        return
+
+    console.print(f"[bold]Repo name:[/bold] {repo_name}")
+    console.print(f"[bold]Folder:[/bold] {source_folder}")
+
+    table = Table(title=f"Found {len(source_files)} file(s)")
+    table.add_column("No", justify="right", style="cyan")
+    table.add_column("Path", style="bold")
+
+    for index, source_file in enumerate(source_files, start=1):
+        table.add_row(str(index), str(source_file.relative_to(source_folder)))
+
+    console.print(table)
+
+    if not ask_yes_no("Do you want to push now?"):
+        console.print("[yellow]Skipped.[/yellow] You can push later with:")
+        console.print(f"[bold]hw up-session {folder_name}[/bold]")
+        return
+
+    temp_path, folder = copy_folder_to_temp_folder(source_folder, repo_name)
+
+    try:
+        submit_folder(
+            folder,
+            exercise=None,
+            session=None,
+            course=None,
+            visibility=visibility,
+            repo_name=repo_name,
+            include_support_files=False,
+        )
+    except SubmissionSkipped as error:
+        print(error)
+    finally:
+        shutil.rmtree(temp_path, ignore_errors=True)
+
+
+def up_session(folder_name, visibility):
+    up_single_repo_folder(folder_name, visibility)
+
+
+def up_folder(folder_name, visibility):
+    up_split_folder(folder_name, visibility)
 
 
 def copy_file_to_temp_folder(source_file, repo_name):
@@ -895,10 +1147,17 @@ Huong dan nhanh Homework Repo Tool
 9. Nop nguyen folder hien tai voi ten repo tuy chon:
    hw up ten-repo-theo-thay
 
+10. Nop mot folder thanh 1 repo (nhieu file chung 1 repo):
+   hw up-session ten-folder
+
+11. Quet folder va nop moi file/folder con thanh 1 repo rieng:
+   hw up-folder ten-folder
+
 Ghi chu:
 - Mac dinh repo la public.
 - Ten repo lay theo ten file, vi du bai1.py -> bai1-ss05-IT205.
 - Lenh hw up chi upload cac file trong folder (khong tao README.md / .gitignore).
+- Lenh hw up-session / hw up-folder khong tao README.md / .gitignore.
 - Tool tu gan topic: homework, it205, ss05.
 - Neu repo da ton tai, tool se hoi truoc khi push de.
     """.strip()
@@ -1005,6 +1264,38 @@ def main():
         default="public",
     )
 
+    up_session_parser = subparsers.add_parser(
+        "up-session",
+        help="Up nguyen mot folder thanh 1 repo (ten repo = ten folder)",
+    )
+    up_session_parser.add_argument(
+        "folder",
+        nargs="?",
+        default=".",
+        help="Folder can up (mac dinh: folder hien tai).",
+    )
+    up_session_parser.add_argument(
+        "--visibility",
+        choices=["public", "private"],
+        default="public",
+    )
+
+    up_folder_parser = subparsers.add_parser(
+        "up-folder",
+        help="Quet folder va up moi file/folder con thanh repo rieng",
+    )
+    up_folder_parser.add_argument(
+        "folder",
+        nargs="?",
+        default=".",
+        help="Folder can quet (mac dinh: folder hien tai).",
+    )
+    up_folder_parser.add_argument(
+        "--visibility",
+        choices=["public", "private"],
+        default="public",
+    )
+
     subparsers.add_parser("history", help="Xem lai cac link da nop")
     subparsers.add_parser("doctor", help="Kiem tra Git, GitHub CLI, login, pipx")
     subparsers.add_parser("guide", help="Huong dan su dung bang tieng Viet")
@@ -1027,6 +1318,10 @@ def main():
         batch_submit(args.exercise, args.session, args.course, args.visibility)
     elif args.command == "up":
         up(args.repo_name, args.visibility)
+    elif args.command == "up-session":
+        up_session(args.folder, args.visibility)
+    elif args.command == "up-folder":
+        up_folder(args.folder, args.visibility)
     elif args.command == "history":
         show_history()
     elif args.command == "doctor":

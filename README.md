@@ -60,6 +60,18 @@ hw up hackathon-team-01
 
 `hw up` only uploads the files in the current folder (no auto-generated `README.md` or `.gitignore`).
 
+Submit a folder as one repository (repo name = folder name):
+
+```bash
+hw up-session bai3-4
+```
+
+Submit each top-level file/folder inside a folder as its own repository:
+
+```bash
+hw up-folder ss05
+```
+
 Show history:
 
 ```bash
